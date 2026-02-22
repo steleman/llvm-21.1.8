@@ -1,0 +1,371 @@
+--- compiler-rt/CMakeLists.txt	2025-12-12 05:35:47.000000000 -0500
++++ compiler-rt/CMakeLists.txt	2026-02-19 13:39:22.573899821 -0500
+@@ -17,9 +17,10 @@
+   cmake_policy(SET CMP0128 NEW)
+ endif()
+ 
++project(CompilerRT C CXX ASM)
++
+ # Check if compiler-rt is built as a standalone project.
+ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR OR COMPILER_RT_STANDALONE_BUILD)
+-  project(CompilerRT C CXX ASM)
+   set(COMPILER_RT_STANDALONE_BUILD TRUE)
+   set_property(GLOBAL PROPERTY USE_FOLDERS ON)
+ endif()
+@@ -130,11 +131,6 @@
+     set(Python3_EXECUTABLE ${Python2_EXECUTABLE})
+   endif()
+ 
+-  # Ensure that fat libraries are built correctly on Darwin
+-  if(APPLE)
+-    include(UseLibtool)
+-  endif()
+-
+   # Define default arguments to lit.
+   set(LIT_ARGS_DEFAULT "-sv")
+   if (MSVC OR XCODE)
+--- compiler-rt/lib/builtins/CMakeLists.txt	2025-12-12 05:35:47.000000000 -0500
++++ compiler-rt/lib/builtins/CMakeLists.txt	2026-02-19 13:39:22.573175525 -0500
+@@ -34,9 +34,7 @@
+   if(APPLE)
+     include(CompilerRTDarwinUtils)
+   endif()
+-  if(APPLE)
+-    include(UseLibtool)
+-  endif()
++
+   include(AddCompilerRT)
+ 
+   if(MINGW)
+--- libcxxabi/CMakeLists.txt	2025-12-12 05:35:47.000000000 -0500
++++ libcxxabi/CMakeLists.txt	2026-02-19 13:39:22.575635569 -0500
+@@ -471,6 +471,8 @@
+ set(LIBCXXABI_LIBUNWIND_PATH "${LIBCXXABI_LIBUNWIND_PATH}" CACHE PATH
+     "Specify path to libunwind source." FORCE)
+ 
++add_compile_options("-I${LLVM_MAIN_SRC_DIR}/libcxxabi/include")
++
+ if (LIBCXXABI_USE_LLVM_UNWINDER OR LLVM_NATIVE_ARCH MATCHES ARM)
+   find_path(LIBCXXABI_LIBUNWIND_INCLUDES_INTERNAL libunwind.h
+     PATHS ${LIBCXXABI_LIBUNWIND_INCLUDES}
+--- lldb/scripts/version-header-fix.py	2025-12-12 05:35:47.000000000 -0500
++++ lldb/scripts/version-header-fix.py	2026-02-19 13:39:22.576636800 -0500
+@@ -22,12 +22,24 @@
+     parser.add_argument(
+         "-o", "--output_path", help="The filepath for the output header."
+     )
++    parser.add_argument("-d", "--dir_path", help="The output directory filepath.")
+     parser.add_argument("-m", "--major", help="The LLDB version major.")
+     parser.add_argument("-n", "--minor", help="The LLDB version minor.")
+     parser.add_argument("-p", "--patch", help="The LLDB version patch number.")
+     args = parser.parse_args()
+     input_path = str(args.input_path)
+     output_path = str(args.output_path)
++    dir_path = str(args.dir_path)
++
++    try:
++        os.mkdir(dir_path)
++        print(f"Directory '{dir_path}' created successfully.")
++    except FileExistsError:
++        print(f"Directory '{dir_path}' already exists. This is not an error.")
++    except PermissionError:
++        print(f"Permission denied: cannot create {dir_path}. This is a configuration error.")
++    except Exception as e:
++        print(f"Exception: some other error occured. This is an unhandled error.")
+ 
+     with open(input_path, "r") as input_file:
+         lines = input_file.readlines()
+--- lldb/source/API/CMakeLists.txt	2025-12-12 05:35:47.000000000 -0500
++++ lldb/source/API/CMakeLists.txt	2026-02-19 13:39:22.576887457 -0500
+@@ -326,7 +326,7 @@
+ endforeach()
+ 
+ add_custom_command(TARGET liblldb POST_BUILD
+-  COMMAND "${Python3_EXECUTABLE}" ${LLDB_SOURCE_DIR}/scripts/version-header-fix.py -i ${LLDB_SOURCE_DIR}/include/lldb/lldb-defines.h -o ${lldb_header_staging_dir}/lldb-defines.h -m ${LLDB_VERSION_MAJOR} -n ${LLDB_VERSION_MINOR} -p ${LLDB_VERSION_PATCH}
++  COMMAND "${Python3_EXECUTABLE}" ${LLDB_SOURCE_DIR}/scripts/version-header-fix.py -i ${LLDB_SOURCE_DIR}/include/lldb/lldb-defines.h -o ${lldb_header_staging_dir}/lldb-defines.h -d ${lldb_header_staging_dir} -m ${LLDB_VERSION_MAJOR} -n ${LLDB_VERSION_MINOR} -p ${LLDB_VERSION_PATCH}
+ )
+ add_custom_target(liblldb-header-staging DEPENDS ${lldb_staged_headers})
+ add_dependencies(liblldb liblldb-header-staging)
+--- llvm/cmake/config-ix.cmake	2025-12-12 05:35:47.000000000 -0500
++++ llvm/cmake/config-ix.cmake	2026-02-19 13:39:22.577455848 -0500
+@@ -757,7 +757,7 @@
+     if( OCAML_VERSION VERSION_LESS "4.00.0" )
+       message(STATUS "OCaml bindings disabled, need OCaml >=4.00.0.")
+     else()
+-      find_ocamlfind_package(ctypes VERSION 0.4 OPTIONAL)
++      find_ocamlfind_package(ctypes VERSION 0.23.0 OPTIONAL)
+       if( HAVE_OCAML_CTYPES )
+         message(STATUS "OCaml bindings enabled.")
+         set(LLVM_BINDINGS "${LLVM_BINDINGS} ocaml")
+--- llvm/CMakeLists.txt	2025-12-12 05:35:47.000000000 -0500
++++ llvm/CMakeLists.txt	2026-02-19 17:34:26.139942227 -0500
+@@ -78,6 +78,10 @@
+ set(CMAKE_CXX_STANDARD_REQUIRED YES)
+ set(CMAKE_CXX_EXTENSIONS NO)
+ 
++set(CMAKE_C_STANDARD 11)
++set(CMAKE_C_STANDARD_REQUIRED YES)
++set(CMAKE_C_EXTENSIONS NO)
++
+ if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+   message(FATAL_ERROR "
+ No build type selected. You need to pass -DCMAKE_BUILD_TYPE=<type> in order to configure LLVM.
+@@ -90,11 +94,24 @@
+ ")
+ endif()
+ 
++if ("${CMAKE_BUILD_TYPE}" STREQUAL "Release")
++  add_definitions(-DNDEBUG)
++  add_definitions(-DLLVM_ENABLE_DUMP)
++endif()
++
++if (APPLE)
++  add_definitions(-D_DARWIN_C_SOURCE)
++endif()
++
++if (LINUX)
++  add_definitions(-D_GNU_SOURCE -D_XOPEN_SOURCE=700)
++endif()
++
+ # Set default build type for cmake's try_compile module.
+ # CMake 3.17 or newer sets CMAKE_DEFAULT_BUILD_TYPE to one of the
+ # items from CMAKE_CONFIGURATION_TYPES. Logic below can be further
+ # simplified once LLVM's minimum CMake version is updated to 3.17.
+-if(CMAKE_DEFAULT_BUILD_TYPE)
++if (CMAKE_DEFAULT_BUILD_TYPE AND ${CMAKE_BUILD_TYPE} STREQUAL "")
+   set(CMAKE_TRY_COMPILE_CONFIGURATION ${CMAKE_DEFAULT_BUILD_TYPE})
+ else()
+   if(CMAKE_CONFIGURATION_TYPES)
+@@ -104,6 +121,9 @@
+   endif()
+ endif()
+ 
++message(STATUS "CMAKE_BUILD_TYPE: ${CMAKE_BUILD_TYPE}")
++message(STATUS "CMAKE_DEFAULT_BUILD_TYPE: ${CMAKE_DEFAULT_BUILD_TYPE}")
++
+ # Side-by-side subprojects layout: automatically set the
+ # LLVM_EXTERNAL_${project}_SOURCE_DIR using LLVM_ALL_PROJECTS
+ # This allows an easy way of setting up a build directory for llvm and another
+@@ -998,11 +1018,6 @@
+   endforeach()
+ endif()
+ 
+-# Use libtool instead of ar if you are both on an Apple host, and targeting Apple.
+-if(CMAKE_HOST_APPLE AND APPLE)
+-  include(UseLibtool)
+-endif()
+-
+ # Override the default target with an environment variable named by LLVM_TARGET_TRIPLE_ENV.
+ set(LLVM_TARGET_TRIPLE_ENV CACHE STRING "The name of environment variable to override default target. Disabled by blank.")
+ mark_as_advanced(LLVM_TARGET_TRIPLE_ENV)
+--- llvm/cmake/modules/AddLLVM.cmake	2025-12-12 05:35:47.000000000 -0500
++++ llvm/cmake/modules/AddLLVM.cmake	2026-02-19 13:39:22.577839165 -0500
+@@ -663,18 +663,6 @@
+       target_compile_definitions(${name} PRIVATE LLVM_EXPORTS)
+     endif()
+ 
+-    # When building shared objects for each target there are some internal APIs
+-    # that are used across shared objects which we can't hide.
+-    if (LLVM_BUILD_LLVM_DYLIB_VIS AND NOT BUILD_SHARED_LIBS AND NOT APPLE AND
+-        (NOT (WIN32 OR CYGWIN) OR ((MINGW OR CYGWIN) AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")) AND
+-        NOT (${CMAKE_SYSTEM_NAME} MATCHES "AIX") AND
+-        NOT DEFINED CMAKE_CXX_VISIBILITY_PRESET)
+-
+-      set_target_properties(${name} PROPERTIES
+-                            C_VISIBILITY_PRESET hidden
+-                            CXX_VISIBILITY_PRESET hidden
+-                            VISIBILITY_INLINES_HIDDEN YES)
+-    endif()
+     set_property(GLOBAL APPEND PROPERTY LLVM_COMPONENT_LIBS ${name})
+   endif()
+ 
+--- llvm/cmake/modules/HandleLLVMOptions.cmake	2025-12-12 05:35:47.000000000 -0500
++++ llvm/cmake/modules/HandleLLVMOptions.cmake	2026-02-19 13:39:22.578402415 -0500
+@@ -464,16 +464,6 @@
+   endif()
+ endif()
+ 
+-if((NOT (${CMAKE_SYSTEM_NAME} MATCHES "AIX")) AND
+-   (NOT (WIN32 OR CYGWIN) OR ((MINGW OR CYGWIN) AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")))
+-  # GCC for MinGW does nothing about -fvisibility-inlines-hidden, but warns
+-  # about use of the attributes. As long as we don't use the attributes (to
+-  # override the default) we shouldn't set the command line options either.
+-  # GCC on AIX warns if -fvisibility-inlines-hidden is used and Clang on AIX doesn't currently support visibility.
+-  check_cxx_compiler_flag("-fvisibility-inlines-hidden" SUPPORTS_FVISIBILITY_INLINES_HIDDEN_FLAG)
+-  append_if(SUPPORTS_FVISIBILITY_INLINES_HIDDEN_FLAG "-fvisibility-inlines-hidden" CMAKE_CXX_FLAGS)
+-endif()
+-
+ if(CMAKE_SIZEOF_VOID_P EQUAL 8 AND MINGW)
+   add_compile_definitions(_FILE_OFFSET_BITS=64)
+ endif()
+--- llvm/cmake/modules/LLVMInstallSymlink.cmake	2025-12-12 05:35:47.000000000 -0500
++++ llvm/cmake/modules/LLVMInstallSymlink.cmake	2026-02-19 13:39:22.578200102 -0500
+@@ -4,7 +4,13 @@
+ 
+ # Set to an arbitrary directory to silence GNUInstallDirs warnings
+ # regarding being unable to determine libdir.
++
++if (LINUX)
++  set(CMAKE_INSTALL_LIBDIR "lib64")
++else()
+ set(CMAKE_INSTALL_LIBDIR "lib")
++endif()
++
+ include(GNUInstallDirs)
+ 
+ function(install_symlink name target outdir link_or_copy)
+--- llvm/lib/CodeGen/MachineInstr.cpp	2025-12-12 05:35:47.000000000 -0500
++++ llvm/lib/CodeGen/MachineInstr.cpp	2026-02-19 17:33:25.227677522 -0500
+@@ -1729,7 +1729,7 @@
+   return TypeToPrint;
+ }
+ 
+-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
++#if defined(LLVM_ENABLE_DUMP)
+ LLVM_DUMP_METHOD void MachineInstr::dump() const {
+   dbgs() << "  ";
+   print(dbgs());
+--- mlir/cmake/modules/AddMLIR.cmake	2025-12-12 05:35:47.000000000 -0500
++++ mlir/cmake/modules/AddMLIR.cmake	2026-02-19 13:39:22.575326264 -0500
+@@ -655,13 +655,7 @@
+     ADDITIONAL_HEADER_DIRS
+     ${MLIR_MAIN_INCLUDE_DIR}/mlir-c
+   )
+-  # API libraries compile with hidden visibility and macros that enable
+-  # exporting from the DLL. Only apply to the obj lib, which only affects
+-  # the exports via a shared library.
+-  set_target_properties(obj.${name}
+-    PROPERTIES
+-    CXX_VISIBILITY_PRESET hidden
+-  )
++
+   target_compile_definitions(obj.${name}
+     PRIVATE
+     -DMLIR_CAPI_BUILDING_LIBRARY=1
+--- mlir/include/mlir/Dialect/Arith/IR/Arith.h	2025-12-12 05:35:47.000000000 -0500
++++ mlir/include/mlir/Dialect/Arith/IR/Arith.h	2026-02-19 13:39:22.575040176 -0500
+@@ -105,6 +105,10 @@
+     return cast<IntegerAttr>(arith::ConstantOp::getValue()).getInt();
+   }
+ 
++  static ConstantIndexOp create(OpBuilder& builder, Location loc, int64_t value);
++
++  static ConstantIndexOp create(ImplicitLocOpBuilder& builder, int64_t value);
++
+   static bool classof(Operation *op);
+ };
+ 
+--- mlir/lib/Dialect/Arith/IR/ArithOps.cpp	2025-12-12 05:35:47.000000000 -0500
++++ mlir/lib/Dialect/Arith/IR/ArithOps.cpp	2026-02-19 13:39:22.574512206 -0500
+@@ -291,6 +291,21 @@
+                            builder.getIndexAttr(value));
+ }
+ 
++arith::ConstantIndexOp
++arith::ConstantIndexOp::create(OpBuilder &builder, Location location,
++                               int64_t value) {
++  mlir::OperationState state(location, getOperationName());
++  build(builder, state, value);
++  auto result = dyn_cast<ConstantIndexOp>(builder.create(state));
++  assert(result && "builder didn't return the right type");
++  return result;
++}
++
++arith::ConstantIndexOp
++arith::ConstantIndexOp::create(ImplicitLocOpBuilder &builder, int64_t value) {
++   return create(builder, builder.getLoc(), value);
++}
++
+ bool arith::ConstantIndexOp::classof(Operation *op) {
+   if (auto constOp = dyn_cast_or_null<arith::ConstantOp>(op))
+     return constOp.getType().isIndex();
+--- openmp/CMakeLists.txt	2025-12-12 05:35:47.000000000 -0500
++++ openmp/CMakeLists.txt	2026-02-19 13:39:22.576396492 -0500
+@@ -9,10 +9,18 @@
+   "${LLVM_COMMON_CMAKE_UTILS}/Modules"
+   )
+ 
++project(openmp C CXX ASM)
++set(CMAKE_CXX_STANDARD 17 CACHE STRING "C++ standard to conform to")
++set(CMAKE_CXX_STANDARD_REQUIRED NO)
++set(CMAKE_CXX_EXTENSIONS NO)
++
++set(CMAKE_C_STANDARD 11 CACHE STRING "C standard to conform to")
++set(CMAKE_C_STANDARD_REQUIRED NO)
++set(CMAKE_C_EXTENSIONS NO)
++
+ # llvm/runtimes/ will set OPENMP_STANDALONE_BUILD.
+ if (OPENMP_STANDALONE_BUILD OR "${CMAKE_SOURCE_DIR}" STREQUAL "${CMAKE_CURRENT_SOURCE_DIR}")
+   set(OPENMP_STANDALONE_BUILD TRUE)
+-  project(openmp C CXX ASM)
+ else()
+   set(OPENMP_STANDALONE_BUILD FALSE)
+ endif()
+@@ -44,9 +52,6 @@
+     "FORTRAN compiler to use for testing OpenMP runtime libraries.")
+   set(OPENMP_LLVM_TOOLS_DIR "" CACHE PATH "Path to LLVM tools for testing.")
+ 
+-  set(CMAKE_CXX_STANDARD 17 CACHE STRING "C++ standard to conform to")
+-  set(CMAKE_CXX_STANDARD_REQUIRED NO)
+-  set(CMAKE_CXX_EXTENSIONS NO)
+ else()
+   set(OPENMP_ENABLE_WERROR ${LLVM_ENABLE_WERROR})
+ 
+@@ -146,6 +151,26 @@
+ 
+ option(OPENMP_MSVC_NAME_SCHEME "Build dll with MSVC naming scheme." OFF)
+ 
++string(REPLACE "-fvisibility-inlines-hidden" "" CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
++string(REPLACE "-fvisibility-inlines-hidden" "" CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE}")
++string(REPLACE "-fvisibility=hidden" "" CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
++string(REPLACE "-fvisibility=hidden" "" CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE}")
++string(REPLACE "-fno-semantic-interposition" "" CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
++string(REPLACE "-fno-semantic-interposition" "" CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE}")
++
++string(REPLACE "-fvisibility-inlines-hidden" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
++string(REPLACE "-fvisibility-inlines-hidden" "" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
++string(REPLACE "-fvisibility=hidden" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
++string(REPLACE "-fvisibility=hidden" "" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
++string(REPLACE "-fno-semantic-interposition" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
++string(REPLACE "-fno-semantic-interposition" "" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
++
++if (APPLE)
++  string(REPLACE "-Wl,-headerpad_max_install_names" "" CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS}")
++  string(REPLACE "-Wl,-headerpad_max_install_names" "-Wl,-undefined -Wl,dynamic_lookup" CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS}")
++  string(REPLACE "-Wl,-headerpad_max_install_names" "-Wl,-undefined -Wl,dynamic_lookup" CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS}")
++endif()
++
+ # Build libompd.so
+ add_subdirectory(libompd)
+ 
+--- runtimes/CMakeLists.txt	2025-12-12 05:35:47.000000000 -0500
++++ runtimes/CMakeLists.txt	2026-02-19 13:39:22.576143079 -0500
+@@ -215,11 +215,6 @@
+ option(LLVM_INCLUDE_DOCS "Generate build targets for the runtimes documentation." ON)
+ option(LLVM_ENABLE_SPHINX "Use Sphinx to generate the runtimes documentation." OFF)
+ 
+-# Use libtool instead of ar if you are both on an Apple host, and targeting Apple.
+-if(CMAKE_HOST_APPLE AND APPLE)
+-  include(UseLibtool)
+-endif()
+-
+ # This can be used to detect whether we're in the runtimes build.
+ set(LLVM_RUNTIMES_BUILD ON)
+ 
+--- runtimes/cmake/Modules/HandleFlags.cmake	2025-12-12 05:35:47.000000000 -0500
++++ runtimes/cmake/Modules/HandleFlags.cmake	2026-02-19 13:39:22.575911055 -0500
+@@ -23,14 +23,7 @@
+   foreach(var ${ARGN})
+     string(REPLACE "${var}" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
+     string(REPLACE "${var}" "" CMAKE_CXX_FLAGS_MINSIZEREL "${CMAKE_CXX_FLAGS_MINSIZEREL}")
+-    string(REPLACE "${var}" "" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
+     string(REPLACE "${var}" "" CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}")
+-    string(REPLACE "${var}" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+-    string(REPLACE "${var}" "" CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
+-    string(REPLACE "${var}" "" CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS}")
+-    string(REPLACE "${var}" "" CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS}")
+-    string(REPLACE "${var}" "" CMAKE_SHARED_MODULE_FLAGS "${CMAKE_SHARED_MODULE_FLAGS}")
+-    remove_definitions(${var})
+   endforeach()
+ endmacro(remove_flags)
+ 
